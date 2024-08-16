@@ -18,18 +18,29 @@ pub fn main() !void {
     const connection = try listener.accept();
     defer connection.stream.close();
     try stdout.print("client connected!", .{});
-    try connection.stream.writeAll("HTTP/1.1 200 OK\r\n\r\n");
 
+    var buf: [1024]u8 = undefined;
+    const bytes_read = try connection.stream.read(&buf);
+    const request = buf[0..bytes_read];
+    const request_target = parseRequestTarget(request);
+
+    if (std.mem.eql(u8, request_target, "/")) {
+        try connection.stream.writeAll("HTTP/1.1 200 OK\r\n\r\n");
+    } else {
+        try connection.stream.writeAll("HTTP/1.1 404 Not Found\r\n\r\n");
+    }
+
+    // std.debug.print("request: {s}", .{request});
     // try handleHttpRequest(connection.stream);
 }
 
-pub fn handleHttpRequest(stream: net.Stream) !void {
-    var buf: [1024]u8 = undefined;
-    const bytes_read = try stream.read(&buf);
-    const request = buf[0..bytes_read];
+pub fn parseRequestTarget(request: []const u8) []const u8 {
+    var lines = std.mem.split(u8, request, "\r\n");
+    const first_line = lines.first();
+    var parts = std.mem.split(u8, first_line, " ");
 
-    if (std.mem.eql(u8, request, "GET")) {
-        const response = "HTTP/1.1 200 OK\r\n\r\n";
-        try stream.writeAll(response);
-    }
+    _ = parts.next();
+    const target = parts.next().?;
+
+    return target;
 }
