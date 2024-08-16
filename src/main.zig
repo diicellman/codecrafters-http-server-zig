@@ -18,8 +18,9 @@ pub fn main() !void {
     const connection = try listener.accept();
     defer connection.stream.close();
     try stdout.print("client connected!", .{});
+    try connection.stream.writeAll("HTTP/1.1 200 OK\r\n\r\n");
 
-    try handleHttpRequest(connection.stream);
+    // try handleHttpRequest(connection.stream);
 }
 
 pub fn handleHttpRequest(stream: net.Stream) !void {
