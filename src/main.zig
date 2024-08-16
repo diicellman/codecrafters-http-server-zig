@@ -15,6 +15,20 @@ pub fn main() !void {
     });
     defer listener.deinit();
 
-    _ = try listener.accept();
+    const connection = try listener.accept();
+    defer connection.stream.close();
     try stdout.print("client connected!", .{});
+
+    try handleHttpRequest(connection.stream);
+}
+
+pub fn handleHttpRequest(stream: net.Stream) !void {
+    var buf: [1024]u8 = undefined;
+    const bytes_read = try stream.read(&buf);
+    const request = buf[0..bytes_read];
+
+    if (std.mem.eql(u8, request, "GET")) {
+        const response = "HTTP/1.1 200 OK\r\n\r\n";
+        try stream.writeAll(response);
+    }
 }
