@@ -58,7 +58,7 @@ pub fn parseRequestPath(request: []const u8) []const u8 {
 
     var path_parts = std.mem.split(u8, path, "/");
     _ = path_parts.next();
-    const path_value = path_parts.next().?;
+    const path_value = path_parts.next() orelse "";
 
     return path_value;
 }
