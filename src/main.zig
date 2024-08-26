@@ -1,6 +1,7 @@
 const std = @import("std");
 // Uncomment this block to pass the first stage
 const net = std.net;
+const Thread = std.Thread;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -16,13 +17,24 @@ pub fn main() !void {
     });
     defer listener.deinit();
 
-    const connection = try listener.accept();
+    try stdout.print("Server starting...\n", .{});
+
+    while (true) {
+        const connection = try listener.accept();
+        try stdout.print("Client connected!\n", .{});
+
+        const thread = try Thread.spawn(.{}, handleConnection, .{ connection, allocator });
+        thread.detach();
+    }
+}
+
+fn handleConnection(connection: net.Server.Connection, allocator: std.mem.Allocator) !void {
     defer connection.stream.close();
-    try stdout.print("client connected!\n", .{});
 
     var buf: [1024]u8 = undefined;
     const bytes_read = try connection.stream.read(&buf);
     const request = buf[0..bytes_read];
+
     const request_target = parseRequestTarget(request);
     const request_path_value = parseRequestPath(request);
     const request_header_value = parseRequestHeader(request);
@@ -41,10 +53,8 @@ pub fn main() !void {
         try connection.stream.writeAll("HTTP/1.1 404 Not Found\r\n\r\n");
     }
 
-    // std.debug.print("request path value: {s}\n", .{request_path_value});
     std.debug.print("{s}\n", .{request});
     std.debug.print("header value: {s}\n", .{request_header_value});
-    // std.debug.print("request target: {s}\n", .{request_target});
 }
 
 pub fn parseRequestTarget(request: []const u8) []const u8 {
