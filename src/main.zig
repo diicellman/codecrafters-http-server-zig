@@ -25,6 +25,7 @@ pub fn main() !void {
     const request = buf[0..bytes_read];
     const request_target = parseRequestTarget(request);
     const request_path_value = parseRequestPath(request);
+    const request_header_value = parseRequestHeader(request);
 
     if (std.mem.eql(u8, request_target, "/")) {
         try connection.stream.writeAll("HTTP/1.1 200 OK\r\n\r\n");
@@ -32,13 +33,18 @@ pub fn main() !void {
         const response = try std.fmt.allocPrint(allocator, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {d}\r\n\r\n{s}", .{ request_path_value.len, request_path_value });
         defer allocator.free(response);
         try connection.stream.writeAll(response);
+    } else if (std.mem.indexOf(u8, request, "/user-agent") != null) {
+        const response = try std.fmt.allocPrint(allocator, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {d}\r\n\r\n{s}", .{ request_header_value.len, request_header_value });
+        defer allocator.free(response);
+        try connection.stream.writeAll(response);
     } else {
         try connection.stream.writeAll("HTTP/1.1 404 Not Found\r\n\r\n");
     }
 
-    std.debug.print("request path value: {s}\n", .{request_path_value});
-    std.debug.print("request: {s}\n", .{request});
-    std.debug.print("request target: {s}\n", .{request_target});
+    // std.debug.print("request path value: {s}\n", .{request_path_value});
+    std.debug.print("{s}\n", .{request});
+    std.debug.print("header value: {s}\n", .{request_header_value});
+    // std.debug.print("request target: {s}\n", .{request_target});
 }
 
 pub fn parseRequestTarget(request: []const u8) []const u8 {
@@ -61,4 +67,18 @@ pub fn parseRequestPath(request: []const u8) []const u8 {
     const path_value = path_parts.next() orelse "";
 
     return path_value;
+}
+
+pub fn parseRequestHeader(request: []const u8) []const u8 {
+    var lines = std.mem.split(u8, request, "\r\n");
+
+    while (lines.next()) |line| {
+        var lower_case_buf: [256]u8 = undefined;
+        const lower_case_line = std.ascii.lowerString(&lower_case_buf, line);
+
+        if (std.mem.startsWith(u8, lower_case_line, "user-agent")) {
+            return std.mem.trim(u8, line["user-agent:".len..], " ");
+        }
+    }
+    return "thanks for playing.";
 }
