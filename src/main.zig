@@ -169,7 +169,8 @@ fn readFile(file_name: []const u8, allocator: std.mem.Allocator) ![]u8 {
     const file_path = try std.fmt.allocPrint(allocator, "/tmp/{s}", .{file_name});
     defer allocator.free(file_path);
 
-    const file = try fs.cwd().openFile(file_path, .{});
+    // const file = try fs.cwd().openFile(file_path, .{});
+    const file = try fs.openFileAbsolute(file_path, .{});
     defer file.close();
 
     const file_size = try file.getEndPos();
