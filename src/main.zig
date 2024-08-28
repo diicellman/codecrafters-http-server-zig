@@ -8,6 +8,7 @@ const Request = struct {
     method: []const u8,
     path: []const u8,
     headers: Headers,
+    body: []const u8,
 };
 
 const Headers = struct {
@@ -46,7 +47,10 @@ const Endpoint = union(enum) {
     root,
     echo: []const u8,
     user_agent,
-    file: []const u8,
+    file: struct {
+        name: []const u8,
+        method: enum { GET, POST },
+    },
     not_found,
 };
 
@@ -83,7 +87,7 @@ fn handleConnection(connection: net.Server.Connection, allocator: std.mem.Alloca
     var request = try parseRequest(raw_request, allocator);
     defer request.headers.deinit();
 
-    const endpoint = try routeRequest(request.path, allocator);
+    const endpoint = try routeRequest(request.method, request.path, allocator);
     try handleEndpoint(endpoint, connection, request, allocator);
 }
 
@@ -98,22 +102,32 @@ fn parseRequest(raw_request: []const u8, allocator: std.mem.Allocator) !Request 
     var headers = Headers.init(allocator);
     errdefer headers.deinit();
 
+    var body_start: usize = 0;
+    var line_count: usize = 1; // Start at 1 to account for the first line
+
     while (lines.next()) |line| {
-        if (line.len == 0) break;
+        line_count += 1;
+        if (line.len == 0) {
+            body_start = std.mem.indexOfPos(u8, raw_request, line_count, "\r\n\r\n").? + 4;
+            break;
+        }
         var header_parts = std.mem.split(u8, line, ":");
         const key = std.mem.trim(u8, header_parts.next() orelse continue, " ");
         const value = std.mem.trim(u8, header_parts.next() orelse continue, " ");
         try headers.put(key, value);
     }
 
+    const body = if (body_start > 0 and body_start < raw_request.len) raw_request[body_start..] else &[_]u8{};
+
     return Request{
         .method = method,
         .path = path,
         .headers = headers,
+        .body = body,
     };
 }
 
-fn routeRequest(path: []const u8, allocator: std.mem.Allocator) !Endpoint {
+fn routeRequest(method: []const u8, path: []const u8, allocator: std.mem.Allocator) !Endpoint {
     if (std.mem.eql(u8, path, "/")) {
         return Endpoint.root;
     } else if (std.mem.startsWith(u8, path, "/echo/")) {
@@ -123,7 +137,10 @@ fn routeRequest(path: []const u8, allocator: std.mem.Allocator) !Endpoint {
         return Endpoint.user_agent;
     } else if (std.mem.startsWith(u8, path, "/files/")) {
         const file_name = try allocator.dupe(u8, path[7..]);
-        return Endpoint{ .file = file_name };
+        return Endpoint{ .file = .{
+            .name = file_name,
+            .method = if (std.mem.eql(u8, method, "POST")) .POST else .GET,
+        } };
     } else {
         return Endpoint.not_found;
     }
@@ -144,22 +161,35 @@ fn handleEndpoint(endpoint: Endpoint, connection: net.Server.Connection, request
             defer allocator.free(response);
             try connection.stream.writeAll(response);
         },
-        .file => |file_name| {
-            const file_content = readFile(file_name, allocator) catch |err| {
-                if (err == error.FileNotFound) {
-                    try connection.stream.writeAll("HTTP/1.1 404 Not Found\r\n\r\n");
-                } else {
-                    try connection.stream.writeAll("HTTP/1.1 500 Internal Server Error\r\n\r\n");
-                }
-                allocator.free(file_name);
-                return;
-            };
-            defer allocator.free(file_content);
-            defer allocator.free(file_name);
+        .file => |file| {
+            switch (file.method) {
+                .GET => {
+                    const file_content = readFile(file.name, allocator) catch |err| {
+                        if (err == error.FileNotFound) {
+                            try connection.stream.writeAll("HTTP/1.1 404 Not Found\r\n\r\n");
+                        } else {
+                            try connection.stream.writeAll("HTTP/1.1 500 Internal Server Error\r\n\r\n");
+                        }
+                        allocator.free(file.name);
+                        return;
+                    };
+                    defer allocator.free(file_content);
+                    defer allocator.free(file.name);
 
-            const response = try std.fmt.allocPrint(allocator, "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {d}\r\n\r\n{s}", .{ file_content.len, file_content });
-            defer allocator.free(response);
-            try connection.stream.writeAll(response);
+                    const header = try std.fmt.allocPrint(allocator, "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {d}\r\n\r\n", .{file_content.len});
+                    defer allocator.free(header);
+
+                    try connection.stream.writeAll(header);
+                    try connection.stream.writeAll(file_content);
+                },
+                .POST => {
+                    try writeFile(file.name, request.body, allocator);
+                    defer allocator.free(file.name);
+
+                    const response = "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n";
+                    try connection.stream.writeAll(response);
+                },
+            }
         },
         .not_found => try connection.stream.writeAll("HTTP/1.1 404 Not Found\r\n\r\n"),
     }
@@ -181,4 +211,14 @@ fn readFile(file_name: []const u8, allocator: std.mem.Allocator) ![]u8 {
     if (bytes_read != file_size) return error.IncompleteRead;
 
     return buffer;
+}
+
+fn writeFile(file_name: []const u8, content: []const u8, allocator: std.mem.Allocator) !void {
+    const file_path = try std.fmt.allocPrint(allocator, "/tmp/{s}", .{file_name});
+    defer allocator.free(file_path);
+
+    const file = try fs.createFileAbsolute(file_path, .{ .read = true });
+    defer file.close();
+
+    try file.writeAll(content);
 }
