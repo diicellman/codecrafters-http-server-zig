@@ -214,7 +214,7 @@ fn readFile(file_name: []const u8, allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn writeFile(file_name: []const u8, content: []const u8, allocator: std.mem.Allocator) !void {
-    const file_path = try std.fmt.allocPrint(allocator, "/tmp/{s}", .{file_name});
+    const file_path = try std.fmt.allocPrint(allocator, "/tmp/data/codecrafters.io/http-server-tester/{s}", .{file_name});
     defer allocator.free(file_path);
 
     const file = try fs.createFileAbsolute(file_path, .{ .read = true });
