@@ -150,10 +150,20 @@ fn handleEndpoint(endpoint: Endpoint, connection: net.Server.Connection, request
     switch (endpoint) {
         .root => try connection.stream.writeAll("HTTP/1.1 200 OK\r\n\r\n"),
         .echo => |content| {
-            const response = try std.fmt.allocPrint(allocator, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {d}\r\n\r\n{s}", .{ content.len, content });
-            defer allocator.free(response);
-            try connection.stream.writeAll(response);
-            allocator.free(content);
+            const accept_encoding = request.headers.get("accept-encoding") orelse "";
+            const use_gzip = std.mem.indexOf(u8, accept_encoding, "gzip") != null;
+
+            if (use_gzip) {
+                const response = try std.fmt.allocPrint(allocator, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: {d}\r\n\r\n{s}", .{ content.len, content });
+                defer allocator.free(response);
+                try connection.stream.writeAll(response);
+                allocator.free(content);
+            } else {
+                const response = try std.fmt.allocPrint(allocator, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {d}\r\n\r\n{s}", .{ content.len, content });
+                defer allocator.free(response);
+                try connection.stream.writeAll(response);
+                allocator.free(content);
+            }
         },
         .user_agent => {
             const user_agent = request.headers.get("User-Agent") orelse "";
