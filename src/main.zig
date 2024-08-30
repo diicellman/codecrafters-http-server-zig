@@ -3,6 +3,7 @@ const std = @import("std");
 const net = std.net;
 const Thread = std.Thread;
 const fs = std.fs;
+const compress = std.compress;
 
 const Request = struct {
     method: []const u8,
@@ -154,10 +155,23 @@ fn handleEndpoint(endpoint: Endpoint, connection: net.Server.Connection, request
             const use_gzip = std.mem.indexOf(u8, accept_encoding, "gzip") != null;
 
             if (use_gzip) {
-                const response = try std.fmt.allocPrint(allocator, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: {d}\r\n\r\n{s}", .{ content.len, content });
+                var compressed = std.ArrayList(u8).init(allocator);
+                defer compressed.deinit();
+
+                {
+                    var gzip = try compress.gzip.compressor(compressed.writer(), .{});
+                    const bytes_written = try gzip.write(content);
+                    if (bytes_written != content.len) {
+                        return error.IncompleteWrite;
+                    }
+                    try gzip.finish();
+                }
+
+                const response = try std.fmt.allocPrint(allocator, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: {d}\r\n\r\n", .{compressed.items.len});
                 defer allocator.free(response);
+
                 try connection.stream.writeAll(response);
-                allocator.free(content);
+                try connection.stream.writeAll(compressed.items);
             } else {
                 const response = try std.fmt.allocPrint(allocator, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {d}\r\n\r\n{s}", .{ content.len, content });
                 defer allocator.free(response);
